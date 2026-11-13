@@ -3,8 +3,8 @@
 Sell what's worth more at the auction house than at the vendor, in a few clicks.
 For **World of Warcraft: Forever**. English and French.
 
-> **Beta.** It works, but it's young: if something looks wrong, or you have an idea, tell us
-> on Discord: https://discord.gg/5bgAnccyHj
+> **Beta.** It works, but it's young: if something looks wrong, or you have an idea, leave a
+> comment on CurseForge or open an issue: https://github.com/vivekabarneaud/SellThatStuff/issues
 
 ## What it does
 
