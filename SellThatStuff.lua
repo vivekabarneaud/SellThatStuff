@@ -114,6 +114,7 @@ function Next()
 end
 
 local function StartScan()
+  scannedOnce = true
   results = Collect()
   queue = {}
   for _, g in ipairs(results) do queue[#queue + 1] = g end
@@ -242,13 +243,13 @@ function Refresh()
   panel.content:SetHeight(math.max(#list * ROW_H, 1))
   if #queue > 0 or current then
     panel.status:SetText(string.format(L.SCANNING, done, total))
-  elseif total == 0 and scannedOnce then
-    panel.status:SetText(L.NOTHING)
   elseif total > 0 then
     panel.status:SetText(string.format(L.DONE, worth, total))
   else
-    panel.status:SetText(L.HINT)
+    panel.status:SetText("")
   end
+  panel.empty:SetText(scannedOnce and total == 0 and L.NOTHING or "")
+  panel.money:SetText(Money(GetMoney and GetMoney() or 0))
 end
 
 local function Header(parent)
@@ -276,44 +277,57 @@ local function Header(parent)
 end
 
 local function CreatePanel()
+  -- Covers the window's content, under its title and around its portrait (top left),
+  -- above everything else the window shows (Blizzard's own tabs and buttons)
   local p = CreateFrame("Frame", "SellThatStuffPanel", AuctionHouseFrame)
-  p:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 6, -30)
-  p:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -6, 26)
-  p:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 20)
-  p:EnableMouse(true) -- (covers the window's own content while our tab is open)
-  local bg = p:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints()
-  bg:SetColorTexture(0.06, 0.06, 0.06, 1)
+  p:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 6, -24)
+  p:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -6, 4)
+  p:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 300)
+  p:EnableMouse(true)
+  local PORTRAIT_W, PORTRAIT_H = 52, 40 -- (the corner left free for the portrait)
+  local top = p:CreateTexture(nil, "BACKGROUND")
+  top:SetPoint("TOPLEFT", PORTRAIT_W, 0)
+  top:SetPoint("BOTTOMRIGHT", p, "TOPRIGHT", 0, -PORTRAIT_H)
+  top:SetColorTexture(0.06, 0.06, 0.06, 1)
+  local main = p:CreateTexture(nil, "BACKGROUND")
+  main:SetPoint("TOPLEFT", 0, -PORTRAIT_H)
+  main:SetPoint("BOTTOMRIGHT")
+  main:SetColorTexture(0.06, 0.06, 0.06, 1)
   p:Hide()
 
   local scan = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-  scan:SetSize(170, 24)
-  scan:SetPoint("TOPRIGHT", -12, -10)
+  scan:SetSize(150, 24)
+  scan:SetPoint("TOPRIGHT", -12, -8)
   scan:SetText(L.SCAN)
-  scan:SetScript("OnClick", function()
-    scannedOnce = true
-    StartScan()
-  end)
+  scan:SetScript("OnClick", StartScan)
   p.scan = scan
 
   p.status = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  p.status:SetPoint("RIGHT", scan, "LEFT", -12, 0)
-  p.status:SetPoint("LEFT", p, "LEFT", 80, 0) -- (clear of the window's portrait)
+  p.status:SetPoint("TOPLEFT", p, "TOPLEFT", PORTRAIT_W + 12, -14)
+  p.status:SetPoint("TOPRIGHT", scan, "TOPLEFT", -12, -6)
   p.status:SetJustifyH("LEFT")
+  p.status:SetWordWrap(false)
 
+  -- your money, bottom left (the window's own money is under our panel)
+  p.money = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  p.money:SetPoint("BOTTOMLEFT", 14, 9)
   local note = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("BOTTOMLEFT", 12, 8)
+  note:SetPoint("BOTTOMRIGHT", -14, 10)
   note:SetText(L.READONLY)
 
   local sf = CreateFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
   sf:SetPoint("TOPLEFT", 12, -64)
-  sf:SetPoint("BOTTOMRIGHT", -30, 26)
+  sf:SetPoint("BOTTOMRIGHT", -30, 32)
   local content = CreateFrame("Frame", nil, sf)
   content:SetSize(1, 1)
   sf:SetScrollChild(content)
   sf:SetScript("OnSizeChanged", function(self, w) content:SetWidth(w) end)
   p.content = content
   Header(sf)
+
+  -- in the middle of the table when it's empty
+  p.empty = p:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  p.empty:SetPoint("CENTER", sf, "CENTER", 0, 0)
 
   p:SetScript("OnHide", function() queue = {} current = nil end)
   panel = p
@@ -339,6 +353,7 @@ local function Select(on)
   if not tab then return end
   panel:SetShown(on)
   if on then
+    StartScan() -- (straight away: what's in your bags, and their prices as they come)
     pcall(PanelTemplates_SelectTab, tab)
     for _, t in ipairs(BlizzardTabs()) do pcall(PanelTemplates_DeselectTab, t) end
   else
