@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: SellThatStuff
+## Notes: Sell what's worth more at the auction house than at the vendor, in a few clicks. Type /sts
+## Version: 0.1.0
+## SavedVariables: SellThatStuffDB
+
+Probe.lua
