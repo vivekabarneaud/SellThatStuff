@@ -72,12 +72,13 @@ local function ForEachSellable(fn)
     local okN, n = pcall(C_Container.GetContainerNumSlots, bag)
     for slot = 1, (okN and n or 0) do
       local info = C_Container.GetContainerItemInfo(bag, slot)
-      -- not grey, not soulbound, worth something at the vendor, and accepted by the auction house
-      if info and info.itemID and (info.quality or 0) >= 1 and not info.isBound and not info.hasNoValue then
+      -- not grey, not soulbound, and accepted by the auction house (an item the vendor won't buy
+      -- counts as vendor price 0: a campfire kit can still sell here)
+      if info and info.itemID and (info.quality or 0) >= 1 and not info.isBound then
         local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
         local okV, valid = pcall(AH.IsSellItemValid, loc, false)
-        local sell = select(11, ItemInfo(info.itemID))
-        if okV and valid and sell and sell > 0 then
+        local sell = (not info.hasNoValue and select(11, ItemInfo(info.itemID))) or 0
+        if okV and valid then
           local okK, key = pcall(AH.GetItemKeyFromItem, loc)
           if okK and key then
             local id = key.itemID .. ":" .. (key.itemLevel or 0) .. ":" .. (key.itemSuffix or 0)
@@ -143,6 +144,35 @@ local function Recalc(g)
   if g.commodity then ok, dep = pcall(AH.CalculateCommodityDeposit, g.itemID, Duration(), g.qty)
   else ok, dep = pcall(AH.CalculateItemDeposit, g.loc, Duration(), g.qty) end
   g.deposit = ok and dep or nil
+end
+
+-- Your bags changed (sold from Blizzard's own tab, moved, used...): every row recounts what's
+-- left; rows for items no longer in your bags go away (the ones you posted here stay, "Posted")
+local function RecountAll()
+  -- one pass through your bags for all the rows
+  local found = {}
+  ForEachSellable(function(bag, slot, info, loc, key, id)
+    local f = found[id]
+    if not f then f = { count = 0, stacks = {}, loc = loc } found[id] = f end
+    f.count = f.count + (info.stackCount or 1)
+    f.stacks[#f.stacks + 1] = { bag = bag, slot = slot, count = info.stackCount or 1 }
+  end)
+  local keep, keepOrder = {}, {}
+  for _, g in ipairs(results) do
+    if g.state ~= "posting" then
+      local f = found[g.id]
+      g.count, g.stacks, g.loc = f and f.count or 0, f and f.stacks or {}, f and f.loc
+      g.qty = math.min(g.qty or 0, MaxQty(g))
+      if g.qty <= 0 then g.qty = MaxQty(g) end
+      Recalc(g)
+    end
+    if g.count > 0 or g.state == "done" or g.state == "posting" then keep[#keep + 1] = g end
+  end
+  for _, g in ipairs(order) do
+    if g.count > 0 or g.state == "done" or g.state == "posting" then keepOrder[#keepOrder + 1] = g end
+  end
+  results, order = keep, keepOrder
+  if #queue == 0 and not current then total = #results end
 end
 
 ---------------------------------------------------------------------------
@@ -710,7 +740,7 @@ local function Select(on)
   if on then
     -- straight away the first time (what's in your bags, and their prices as they come);
     -- after that, the table stays as it was until you rescan or leave the auction house
-    if not scannedOnce then StartScan() else Refresh() end
+    if not scannedOnce then StartScan() else RecountAll() Refresh() end
     -- (what happens when we give our tab the "selected" look: noted for the next fix)
     local okSel, errSel = pcall(PanelTemplates_SelectTab, tab)
     SellThatStuffDB.tabSelect = okSel and "ok" or tostring(errSel)
@@ -757,7 +787,8 @@ end
 local f = CreateFrame("Frame")
 for _, ev in ipairs({ "ADDON_LOADED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
   "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED",
-  "AUCTION_HOUSE_AUCTION_CREATED", "AUCTION_HOUSE_POST_WARNING", "AUCTION_HOUSE_POST_ERROR", "PLAYER_MONEY" }) do
+  "AUCTION_HOUSE_AUCTION_CREATED", "AUCTION_HOUSE_POST_WARNING", "AUCTION_HOUSE_POST_ERROR", "PLAYER_MONEY",
+  "BAG_UPDATE_DELAYED" }) do
   pcall(f.RegisterEvent, f, ev)
 end
 f:SetScript("OnEvent", function(_, event, a)
@@ -787,6 +818,8 @@ f:SetScript("OnEvent", function(_, event, a)
       end
     elseif event == "PLAYER_MONEY" then
       if panel and panel:IsShown() then Refresh() end
+    elseif event == "BAG_UPDATE_DELAYED" then
+      if panel and panel:IsShown() and scannedOnce then RecountAll() Refresh() end
     end
   end)
   if not ok then print("|cff66ccffSellThatStuff|r error (" .. event .. "): " .. tostring(err)) end

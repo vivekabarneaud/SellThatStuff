@@ -3,7 +3,8 @@
 Sell what's worth more at the auction house than at the vendor, in a few clicks.
 For **World of Warcraft: Forever**. English and French.
 
-> **Beta.** It works, but it's young: if something looks wrong, tell us.
+> **Beta.** It works, but it's young: if something looks wrong, or you have an idea, tell us
+> on Discord: https://discord.gg/5bgAnccyHj
 
 ## What it does
 
@@ -18,7 +19,8 @@ Open the auction house and click the **SellThatStuff** tab at the bottom:
 - At the bottom: a **minimum gain** (anything that gains less isn't offered) and the
   **auction duration**. Both are saved.
 
-Never offered: grey items, soulbound items, quest items, items the vendor won't buy.
+Never offered: grey items, soulbound items, quest items. Items the vendor won't buy (a
+campfire kit...) count as vendor price 0.
 
 The deposit is paid when you post and given back if the item sells.
 

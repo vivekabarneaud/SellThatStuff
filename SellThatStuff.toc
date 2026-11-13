@@ -2,7 +2,7 @@
 ## Title: SellThatStuff
 ## Notes: Sell what's worth more at the auction house than at the vendor, in a few clicks. Type /sts
 ## Notes-frFR: Vendez ce qui vaut plus à l'hôtel des ventes que chez le marchand, en quelques clics. Tapez /sts
-## Version: 0.4.1
+## Version: 0.4.2
 ## SavedVariables: SellThatStuffDB
 
 Locale.lua
