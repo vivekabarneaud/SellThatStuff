@@ -13,11 +13,13 @@ local L = {
   WAIT = "One moment, the auction house is busy. Click again.",
   POST_FAILED = "Couldn't post:",
   DURATION = "Auction duration: %s",
-  COL_ITEM = "Item", COL_QTY = "Qty", COL_AH = "AH (each)", COL_VENDOR = "Vendor (each)",
-  COL_GAIN = "Gain if sold", COL_DEPOSIT = "Deposit",
+  COL_ITEM = "Item", COL_QTY = "Qty", COL_AH = "AH (each)", COL_EACH = "Gain (each)",
+  COL_TOTAL = "Total gain", COL_DEPOSIT = "Deposit",
+  SORT = "Sort by gain",
+  TIP_EACH = "For each one sold here instead of at the vendor: the auction house price after its 5% cut, minus the vendor price.",
   NO_PRICE = "none for sale",
   NO_ANSWER = "no answer",
-  TIP_GAIN = "If everything sells at this price: what you get after the auction house's 5% cut, minus what the vendor would pay you.",
+  TIP_GAIN = "For the whole quantity, if it all sells: compared with selling it to the vendor, after the auction house's 5% cut.",
   TIP_DEPOSIT = "Paid when you post. You get it back if it sells, you lose it if it doesn't.",
 }
 
@@ -33,11 +35,13 @@ if GetLocale() == "frFR" then
   L.WAIT = "Un instant, l'hôtel des ventes est occupé. Cliquez à nouveau."
   L.POST_FAILED = "Mise en vente impossible :"
   L.DURATION = "Durée des enchères : %s"
-  L.COL_ITEM, L.COL_QTY, L.COL_AH, L.COL_VENDOR = "Objet", "Qté", "HV (l'unité)", "Marchand (l'unité)"
-  L.COL_GAIN, L.COL_DEPOSIT = "Gain si vendu", "Dépôt"
+  L.COL_ITEM, L.COL_QTY, L.COL_AH, L.COL_EACH = "Objet", "Qté", "HV (l'unité)", "Gain (l'unité)"
+  L.COL_TOTAL, L.COL_DEPOSIT = "Gain total", "Dépôt"
+  L.SORT = "Trier par gain"
+  L.TIP_EACH = "Pour chaque unité vendue ici plutôt qu'au marchand : le prix de l'hôtel des ventes après sa commission de 5 %, moins le prix du marchand."
   L.NO_PRICE = "aucun en vente"
   L.NO_ANSWER = "pas de réponse"
-  L.TIP_GAIN = "Si tout se vend à ce prix : ce que vous touchez après la commission de 5 % de l'hôtel des ventes, moins ce que le marchand vous en donnerait."
+  L.TIP_GAIN = "Pour toute la quantité, si tout se vend : par rapport à une vente au marchand, après la commission de 5 % de l'hôtel des ventes."
   L.TIP_DEPOSIT = "Payé à la mise en vente. Rendu si l'objet se vend, perdu sinon."
 end
 

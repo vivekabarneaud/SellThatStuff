@@ -159,7 +159,6 @@ function Next()
   if current then return end
   local g = table.remove(queue, 1)
   if not g then
-    order = SortRows()
     Refresh()
     return
   end
@@ -291,8 +290,8 @@ local COLS = { -- key, title, width, align
   { "item", "COL_ITEM", 215, "LEFT" },
   { "qty", "COL_QTY", 55, "RIGHT" },
   { "ah", "COL_AH", 95, "RIGHT" },
-  { "vendor", "COL_VENDOR", 95, "RIGHT" },
-  { "gain", "COL_GAIN", 105, "RIGHT" },
+  { "vendor", "COL_EACH", 95, "RIGHT" }, -- (gain per unit, compared with the vendor)
+  { "gain", "COL_TOTAL", 105, "RIGHT" },
   { "deposit", "COL_DEPOSIT", 75, "RIGHT" },
   { "post", "", 85, "RIGHT" },
 }
@@ -349,11 +348,11 @@ local function GetRow(i)
   local qx, qw = ColX("qty")
   local qty = CreateFrame("EditBox", nil, r, "InputBoxTemplate")
   qty:SetSize(qw - 18, 16)
-  qty:SetPoint("RIGHT", r, "LEFT", qx + qw - 6, 0)
+  qty:SetPoint("CENTER", r, "LEFT", qx + qw / 2, 0)
   qty:SetAutoFocus(false)
   qty:SetNumeric(true)
   qty:SetMaxLetters(4)
-  qty:SetJustifyH("RIGHT")
+  qty:SetJustifyH("CENTER")
   qty:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
   qty:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
   qty:SetScript("OnTextChanged", function(self, user)
@@ -416,7 +415,10 @@ function UpdateRow(r, g)
     r.link = g.link
     r.icon:SetTexture(g.icon)
     r.cells.item:SetText(g.link or "?")
-    r.cells.vendor:SetText(Money(g.vendor))
+    -- per unit: what the auction house pays (after its cut) minus what the vendor pays
+    local each = g.price and (math.floor(PostPrice(g.price) * (1 - CUT)) - g.vendor)
+    r.cells.vendor:SetText(not each and "" or each > 0 and ("|cff40ff40+" .. Money(each) .. "|r")
+      or ("|cffff6060-" .. Money(-each) .. "|r"))
     if not r.qty:HasFocus() then r.qty:SetText(g.qty or 0) end
     r.qty:SetShown(g.state ~= "done")
     if g.commodity and g.state == nil then r.qty:Enable() else r.qty:Disable() end
@@ -480,7 +482,7 @@ local function Header(parent)
       fs:SetJustifyH(c[4])
       fs:SetText(L[c[2]])
       -- what "gain" and "deposit" mean, on hover
-      local tipText = (c[1] == "gain" and L.TIP_GAIN) or (c[1] == "deposit" and L.TIP_DEPOSIT)
+      local tipText = (c[1] == "gain" and L.TIP_GAIN) or (c[1] == "deposit" and L.TIP_DEPOSIT) or (c[1] == "vendor" and L.TIP_EACH)
       if tipText then
         local hit = CreateFrame("Frame", nil, parent)
         hit:SetAllPoints(fs)
@@ -504,21 +506,55 @@ local function CreatePanel()
   p:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -6, 4)
   p:SetFrameLevel(AuctionHouseFrame:GetFrameLevel() + 300)
   p:EnableMouse(true)
-  local PORTRAIT_W = 52 -- (the status text starts right of the window's portrait)
-  local bg = p:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints()
-  bg:SetColorTexture(0.06, 0.06, 0.06, 1)
+  -- Our background leaves the corner under the window's portrait open (so the portrait
+  -- shows); a dark patch slipped under the portrait, on its own frame, hides what the
+  -- window draws there (a grey square).
+  local PORTRAIT_W, PORTRAIT_H = 52, 40
+  local DARK = { 0.06, 0.06, 0.06, 1 }
+  local top = p:CreateTexture(nil, "BACKGROUND")
+  top:SetPoint("TOPLEFT", PORTRAIT_W, 0)
+  top:SetPoint("BOTTOMRIGHT", p, "TOPRIGHT", 0, -PORTRAIT_H)
+  top:SetColorTexture(unpack(DARK))
+  local main = p:CreateTexture(nil, "BACKGROUND")
+  main:SetPoint("TOPLEFT", 0, -PORTRAIT_H)
+  main:SetPoint("BOTTOMRIGHT")
+  main:SetColorTexture(unpack(DARK))
+  local portrait = (AuctionHouseFrame.PortraitContainer and AuctionHouseFrame.PortraitContainer.portrait)
+    or AuctionHouseFrame.portrait or _G.AuctionHouseFramePortrait
+  local holder = portrait and portrait.GetParent and portrait:GetParent()
+  if holder and holder ~= AuctionHouseFrame and holder.CreateTexture then
+    p.corner = holder:CreateTexture(nil, "BACKGROUND", nil, -8)
+    p.corner:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
+    p.corner:SetPoint("BOTTOMRIGHT", p, "TOPLEFT", PORTRAIT_W, -PORTRAIT_H)
+    p.corner:SetColorTexture(unpack(DARK))
+    p.corner:Hide()
+  else -- (the portrait isn't on a frame of its own: just cover the corner)
+    local corner = p:CreateTexture(nil, "BACKGROUND")
+    corner:SetPoint("TOPLEFT")
+    corner:SetPoint("BOTTOMRIGHT", p, "TOPLEFT", PORTRAIT_W, -PORTRAIT_H)
+    corner:SetColorTexture(unpack(DARK))
+  end
   p:Hide()
   local scan = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
-  scan:SetSize(150, 24)
+  scan:SetSize(120, 24)
   scan:SetPoint("TOPRIGHT", -12, -8)
   scan:SetText(L.SCAN)
   scan:SetScript("OnClick", StartScan)
   p.scan = scan
+  -- sort by gain (on demand only: rows never move by themselves)
+  local sort = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+  sort:SetSize(120, 24)
+  sort:SetPoint("RIGHT", scan, "LEFT", -6, 0)
+  sort:SetText(L.SORT)
+  sort:SetScript("OnClick", function()
+    order = SortRows()
+    Refresh()
+  end)
+  p.sort = sort
 
   p.status = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   p.status:SetPoint("TOPLEFT", p, "TOPLEFT", PORTRAIT_W + 12, -14)
-  p.status:SetPoint("TOPRIGHT", scan, "TOPLEFT", -12, -6)
+  p.status:SetPoint("TOPRIGHT", sort, "TOPLEFT", -12, -6)
   p.status:SetJustifyH("LEFT")
   p.status:SetWordWrap(false)
 
@@ -588,8 +624,11 @@ local function Select(on)
   if not tab then return end
   if on then RaisePanel() end
   panel:SetShown(on)
+  if panel.corner then panel.corner:SetShown(on) end
   if on then
-    StartScan() -- (straight away: what's in your bags, and their prices as they come)
+    -- straight away the first time (what's in your bags, and their prices as they come);
+    -- after that, the table stays as it was until you rescan or leave the auction house
+    if not scannedOnce then StartScan() else Refresh() end
     pcall(PanelTemplates_SelectTab, tab)
     for _, t in ipairs(BlizzardTabs()) do pcall(PanelTemplates_DeselectTab, t) end
   else
@@ -636,6 +675,7 @@ f:SetScript("OnEvent", function(_, event, a)
       CreateTab()
       Select(false)
     elseif event == "AUCTION_HOUSE_CLOSED" then
+      scannedOnce = nil -- (next visit: a fresh scan)
       posting = nil
       if panel then Select(false) end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
