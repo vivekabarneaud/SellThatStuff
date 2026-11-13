@@ -1,4 +1,4 @@
-## SellThatStuff 0.4.3-beta: first release
+## SellThatStuff 0.4.4-beta: first release
 
 - A **SellThatStuff** tab at the auction house: it looks up everything in your bags and shows what's worth more here than at the vendor.
 - For each item: the cheapest price, your gain per unit and in total (after the 5% cut), and the deposit.
@@ -6,7 +6,7 @@
 - Choose the quantity, a minimum gain, and the auction duration (saved).
 - Never offered: grey, soulbound and quest items. Items the vendor won't buy count as vendor price 0.
 
-## SellThatStuff 0.4.3-beta : première version
+## SellThatStuff 0.4.4-beta : première version
 
 - Un onglet **SellThatStuff** à l'hôtel des ventes : il cherche le prix de tout ce qu'il y a dans vos sacs et vous montre ce qui vaut plus ici que chez le marchand.
 - Pour chaque objet : le prix le plus bas, votre gain à l'unité et au total (après la commission de 5 %), et le dépôt.

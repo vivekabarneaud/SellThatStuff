@@ -221,6 +221,20 @@ function Next()
   end)
 end
 
+-- Back on the tab: your bags may have changed, and a scan cut short (you switched tabs)
+-- picks up where it stopped, for the rows not looked up yet
+local function ResumeScan()
+  RecountAll()
+  queue = {}
+  for _, g in ipairs(order) do
+    if not g.scanned then queue[#queue + 1] = g end
+  end
+  total = #results
+  done = total - #queue
+  Refresh()
+  if #queue > 0 then Next() end
+end
+
 local function StartScan()
   scannedOnce = true
   results = Collect()
@@ -452,6 +466,14 @@ local function SetRowButton(r, g)
   end
 end
 
+-- a gain: green +, red -, or a plain 0
+local function Signed(c)
+  if not c then return "" end
+  if c > 0 then return "|cff40ff40+" .. Money(c) .. "|r" end
+  if c < 0 then return "|cffff6060-" .. Money(-c) .. "|r" end
+  return "0"
+end
+
 -- one row: returns true if it's worth posting
 function UpdateRow(r, g)
     local worthIt = false
@@ -461,8 +483,7 @@ function UpdateRow(r, g)
     r.cells.item:SetText(g.link or "?")
     -- per unit: what the auction house pays (after its cut) minus what the vendor pays
     local each = g.price and (math.floor(PostPrice(g.price) * (1 - CUT)) - g.vendor)
-    r.cells.vendor:SetText(not each and "" or each > 0 and ("|cff40ff40+" .. Money(each) .. "|r")
-      or ("|cffff6060-" .. Money(-each) .. "|r"))
+    r.cells.vendor:SetText(Signed(each))
     if not r.qty:HasFocus() then r.qty:SetText(g.qty or 0) end
     r.qty:SetShown(g.state ~= "done")
     if g.commodity and g.state == nil then r.qty:Enable() else r.qty:Disable() end
@@ -484,8 +505,7 @@ function UpdateRow(r, g)
         r.cells.gain:SetText("")
         r.cells.deposit:SetText("")
       else
-        r.cells.gain:SetText(not g.gain and "" or g.gain > 0 and ("|cff40ff40+" .. Money(g.gain) .. "|r")
-          or ("|cffff6060-" .. Money(-g.gain) .. "|r"))
+        r.cells.gain:SetText(Signed(g.gain))
         r.cells.deposit:SetText(Money(g.deposit))
       end
       r:SetAlpha((good or g.state == "done") and 1 or 0.5)
@@ -743,7 +763,7 @@ local function Select(on)
   if on then
     -- straight away the first time (what's in your bags, and their prices as they come);
     -- after that, the table stays as it was until you rescan or leave the auction house
-    if not scannedOnce then StartScan() else RecountAll() Refresh() end
+    if not scannedOnce then StartScan() else ResumeScan() end
     -- (what happens when we give our tab the "selected" look: noted for the next fix)
     local okSel, errSel = pcall(PanelTemplates_SelectTab, tab)
     SellThatStuffDB.tabSelect = okSel and "ok" or tostring(errSel)
