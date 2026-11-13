@@ -11,3 +11,4 @@ ignore:
   - tools
   - TODO.md
   - RELEASE_NOTES.md
+  - media
