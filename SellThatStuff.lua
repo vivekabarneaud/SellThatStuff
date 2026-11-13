@@ -1,9 +1,9 @@
 -- SellThatStuff - a tab at the auction house: what in your bags is worth more here than
--- at the vendor. Read-only for now (scan + table, nothing is posted).
+-- at the vendor, and a Post button on each row (one click = one auction).
 --
 -- Rules for the auction house window (Blizzard's): we never change its code or its data,
 -- only add our own tab and our own panel on top, and watch its tabs being clicked.
--- That keeps posting (later) from being blocked.
+-- That keeps posting from being blocked (the game only lets addons post on a click).
 
 local ADDON, ns = ...
 local L = ns.L
@@ -14,23 +14,48 @@ local function Money(c)
   local f = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or GetCoinTextureString
   return f and f(math.floor(c)) or (tostring(math.floor(c)) .. "c")
 end
+local function Say(msg) print("|cff66ccffSellThatStuff|r: " .. tostring(msg)) end
 
 local CUT = 0.05          -- the auction house keeps 5% of the sale
-local DURATION = 1        -- the shortest auction (smallest deposit), for now
 local SEARCH_TIMEOUT = 4  -- seconds to wait for a search's answer
+local POST_TIMEOUT = 8    -- seconds to wait for "auction created"
 
 local tab, panel
 local results = {}        -- one entry per kind of item in your bags (after a scan)
 local queue, current, total, done = {}, nil, 0, 0
-local scannedOnce        -- a scan was started at least once (for the "nothing to sell" message)
+local scannedOnce         -- a scan was started at least once (for the "nothing to sell" message)
+local posting             -- { g, qty }: an auction on its way (waiting for the game's answer)
+local order = {}          -- the rows, in the order shown (sorted once the scan is over, so they don't move under your cursor)
+
+-- Auction duration: the one whose name says 8 hours (the game's own labels), else the middle one
+local durationIndex, durationLabel
+local function Duration()
+  if durationIndex then return durationIndex, durationLabel end
+  for i, k in ipairs({ "AUCTION_DURATION_ONE", "AUCTION_DURATION_TWO", "AUCTION_DURATION_THREE" }) do
+    local s = _G[k]
+    if type(s) == "string" and s:match("^%s*8%D") then durationIndex, durationLabel = i, s end
+  end
+  if not durationIndex then durationIndex, durationLabel = 2, _G.AUCTION_DURATION_TWO or "?" end
+  return durationIndex, durationLabel
+end
+
+-- The price we post at: the cheapest one found (rounded down to silver if the auction
+-- house doesn't take copper)
+local function PostPrice(p)
+  local AH = C_AuctionHouse
+  if AH.SupportsCopperValues and not AH.SupportsCopperValues() then
+    return math.max(100, math.floor(p / 100) * 100)
+  end
+  return math.max(1, math.floor(p))
+end
 
 ---------------------------------------------------------------------------
 -- Your bags: what could be sold at the auction house (grouped by kind of item)
 ---------------------------------------------------------------------------
 
-local function Collect()
+-- every stack in your bags that could go to the auction house: fn(bag, slot, info, loc, key, id, vendorPrice)
+local function ForEachSellable(fn)
   local AH = C_AuctionHouse
-  local groups, order = {}, {}
   local last = math.max(NUM_TOTAL_EQUIPPED_BAG_SLOTS or 0, (NUM_BAG_SLOTS or 4) + 1)
   for bag = 0, last do
     local okN, n = pcall(C_Container.GetContainerNumSlots, bag)
@@ -45,40 +70,81 @@ local function Collect()
           local okK, key = pcall(AH.GetItemKeyFromItem, loc)
           if okK and key then
             local id = key.itemID .. ":" .. (key.itemLevel or 0) .. ":" .. (key.itemSuffix or 0)
-            local g = groups[id]
-            if not g then
-              local okS, status = pcall(AH.GetItemCommodityStatus, loc)
-              g = { id = id, itemID = info.itemID, key = key, loc = loc, link = info.hyperlink,
-                icon = info.iconFileID, vendor = sell, count = 0,
-                commodity = okS and Enum and Enum.ItemCommodityStatus and status == Enum.ItemCommodityStatus.Commodity }
-              groups[id] = g
-              order[#order + 1] = g
-            end
-            g.count = g.count + (info.stackCount or 1)
+            fn(bag, slot, info, loc, key, id, sell)
           end
         end
       end
     end
   end
+end
+
+local function MaxQty(g)
+  if not g.loc then return 0 end
+  if not g.commodity then return g.stacks[1] and g.stacks[1].count or 1 end -- (an item: one stack per auction)
+  local AH = C_AuctionHouse
+  local ok, n = pcall(AH.GetAvailablePostCount, g.loc)
+  return (ok and n and n > 0) and n or g.count
+end
+
+local function Collect()
+  local AH = C_AuctionHouse
+  local groups, order = {}, {}
+  ForEachSellable(function(bag, slot, info, loc, key, id, sell)
+    local g = groups[id]
+    if not g then
+      local okS, status = pcall(AH.GetItemCommodityStatus, loc)
+      g = { id = id, itemID = info.itemID, key = key, loc = loc, link = info.hyperlink,
+        icon = info.iconFileID, vendor = sell, count = 0, stacks = {},
+        commodity = okS and Enum and Enum.ItemCommodityStatus and status == Enum.ItemCommodityStatus.Commodity }
+      groups[id] = g
+      order[#order + 1] = g
+    end
+    g.count = g.count + (info.stackCount or 1)
+    g.stacks[#g.stacks + 1] = { bag = bag, slot = slot, count = info.stackCount or 1 }
+  end)
+  for _, g in ipairs(order) do g.qty = MaxQty(g) end
   return order
+end
+
+-- What's left of an item in your bags (after posting, or if you moved things around)
+local function Recount(g)
+  g.count, g.stacks, g.loc = 0, {}, nil
+  ForEachSellable(function(bag, slot, info, loc, key, id)
+    if id == g.id then
+      g.loc = g.loc or loc
+      g.count = g.count + (info.stackCount or 1)
+      g.stacks[#g.stacks + 1] = { bag = bag, slot = slot, count = info.stackCount or 1 }
+    end
+  end)
+  g.qty = math.min(g.qty or 0, MaxQty(g))
+  if g.qty <= 0 then g.qty = MaxQty(g) end
+end
+
+-- gain and deposit for the quantity chosen
+local function Recalc(g)
+  if g.price then
+    local each = PostPrice(g.price)
+    g.gain = math.floor(each * g.qty * (1 - CUT)) - g.vendor * g.qty
+  end
+  local AH = C_AuctionHouse
+  local ok, dep
+  if g.qty <= 0 or not g.loc then g.deposit = nil return end
+  if g.commodity then ok, dep = pcall(AH.CalculateCommodityDeposit, g.itemID, Duration(), g.qty)
+  else ok, dep = pcall(AH.CalculateItemDeposit, g.loc, Duration(), g.qty) end
+  g.deposit = ok and dep or nil
 end
 
 ---------------------------------------------------------------------------
 -- The scan: one search per kind of item, one at a time
 ---------------------------------------------------------------------------
 
-local Refresh -- (the table, further down)
+local Refresh, SortRows, UpdateRow -- (the table, further down)
 
--- the cheapest price found (each, or nil if nobody sells it): gain and deposit
+-- the cheapest price found (each, or nil if nobody sells it)
 local function Finish(g, price)
   g.scanned = true
   g.price = price
-  if price then g.gain = math.floor(price * g.count * (1 - CUT)) - g.vendor * g.count end
-  local AH = C_AuctionHouse
-  local ok, dep
-  if g.commodity then ok, dep = pcall(AH.CalculateCommodityDeposit, g.itemID, DURATION, g.count)
-  else ok, dep = pcall(AH.CalculateItemDeposit, g.loc, DURATION, g.count) end
-  g.deposit = ok and dep or nil
+  Recalc(g)
 end
 
 local Next
@@ -93,12 +159,13 @@ function Next()
   if current then return end
   local g = table.remove(queue, 1)
   if not g then
+    order = SortRows()
     Refresh()
     return
   end
   local AH = C_AuctionHouse
-  -- the game spaces out searches: wait until it's ready
-  if AH.IsThrottledMessageSystemReady and not AH.IsThrottledMessageSystemReady() then
+  -- the game spaces out searches (and an auction being posted goes first): wait until it's ready
+  if posting or (AH.IsThrottledMessageSystemReady and not AH.IsThrottledMessageSystemReady()) then
     table.insert(queue, 1, g)
     C_Timer.After(0.2, Next)
     return
@@ -118,6 +185,8 @@ local function StartScan()
   results = Collect()
   queue = {}
   for _, g in ipairs(results) do queue[#queue + 1] = g end
+  order = {}
+  for _, g in ipairs(results) do order[#order + 1] = g end
   total, done, current = #results, 0, nil
   Refresh()
   Next()
@@ -147,29 +216,107 @@ local function OnItemResults(itemKey)
 end
 
 ---------------------------------------------------------------------------
+-- Posting (on a click: the game only allows it then)
+---------------------------------------------------------------------------
+
+local function Worth(g) return g.scanned and g.price and g.gain and g.gain > 0 and g.qty > 0 end
+
+-- Is the item still where we saw it? (you may have moved things around since the scan)
+local function StillThere(g)
+  local s = g.stacks and g.stacks[1]
+  local info = s and C_Container.GetContainerItemInfo(s.bag, s.slot)
+  return info and info.itemID == g.itemID
+end
+
+local function Post(g)
+  local AH = C_AuctionHouse
+  if posting or not Worth(g) then return end
+  if not StillThere(g) then
+    Recount(g) Recalc(g) Refresh()
+    if not g.loc or not Worth(g) then return end
+  end
+  if AH.IsThrottledMessageSystemReady and not AH.IsThrottledMessageSystemReady() then
+    Say(L.WAIT)
+    return
+  end
+  local each = PostPrice(g.price)
+  local ok, err
+  if g.commodity then ok, err = pcall(AH.PostCommodity, g.loc, Duration(), g.qty, each)
+  else ok, err = pcall(AH.PostItem, g.loc, Duration(), g.qty, nil, each * g.qty) end
+  if not ok then Say(L.POST_FAILED .. " " .. tostring(err)) return end
+  posting = { g = g, qty = g.qty }
+  g.state = "posting"
+  Refresh()
+  C_Timer.After(POST_TIMEOUT, function()
+    if posting and posting.g == g then
+      posting = nil
+      if g.state == "posting" then g.state = nil end
+      Recount(g) Recalc(g) Refresh()
+    end
+  end)
+end
+
+-- the game asks to confirm (an unusual price...): the row's button becomes "Confirm"
+local function Confirm(g)
+  local AH = C_AuctionHouse
+  if g.state ~= "confirm" then return end
+  local ok = pcall(g.commodity and AH.ConfirmPostCommodity or AH.ConfirmPostItem)
+  g.state = ok and "posting" or nil
+  Refresh()
+end
+
+local function OnPosted()
+  local p = posting
+  posting = nil
+  if not p then return end
+  local g = p.g
+  g.posted = (g.posted or 0) + p.qty
+  g.state = nil
+  -- the bags update a moment later
+  C_Timer.After(0.5, function()
+    Recount(g)
+    if g.count <= 0 then g.state = "done" end
+    Recalc(g)
+    Refresh()
+  end)
+  Refresh()
+end
+
+---------------------------------------------------------------------------
 -- The panel: a table with one row per item
 ---------------------------------------------------------------------------
 
-local ROW_H = 22
+local ROW_H = 24
 local COLS = { -- key, title, width, align
-  { "item", "COL_ITEM", 250, "LEFT" },
-  { "qty", "COL_QTY", 45, "RIGHT" },
-  { "ah", "COL_AH", 115, "RIGHT" },
-  { "vendor", "COL_VENDOR", 115, "RIGHT" },
-  { "gain", "COL_GAIN", 115, "RIGHT" },
-  { "deposit", "COL_DEPOSIT", 90, "RIGHT" },
+  { "item", "COL_ITEM", 215, "LEFT" },
+  { "qty", "COL_QTY", 55, "RIGHT" },
+  { "ah", "COL_AH", 95, "RIGHT" },
+  { "vendor", "COL_VENDOR", 95, "RIGHT" },
+  { "gain", "COL_GAIN", 105, "RIGHT" },
+  { "deposit", "COL_DEPOSIT", 75, "RIGHT" },
+  { "post", "", 85, "RIGHT" },
 }
 local rowFrames = {}
 
-local function Sorted()
+function SortRows()
   local list = {}
   for _, g in ipairs(results) do list[#list + 1] = g end
+  local function rank(g) return g.state == "done" and 1 or 0 end -- (posted rows go last)
   table.sort(list, function(a, b)
+    if rank(a) ~= rank(b) then return rank(a) < rank(b) end
     local ga, gb = a.gain or -math.huge, b.gain or -math.huge
     if ga ~= gb then return ga > gb end
     return (a.link or "") < (b.link or "")
   end)
   return list
+end
+
+local function ColX(key)
+  local x = 0
+  for _, c in ipairs(COLS) do
+    if c[1] == key then return x, c[3] end
+    x = x + c[3]
+  end
 end
 
 local function GetRow(i)
@@ -182,20 +329,57 @@ local function GetRow(i)
   r.bg:SetAllPoints()
   r.bg:SetColorTexture(1, 1, 1, i % 2 == 0 and 0.04 or 0)
   r.icon = r:CreateTexture(nil, "ARTWORK")
-  r.icon:SetSize(ROW_H - 4, ROW_H - 4)
+  r.icon:SetSize(ROW_H - 6, ROW_H - 6)
   r.icon:SetPoint("LEFT", 4, 0)
   r.cells = {}
   local x = 0
   for _, c in ipairs(COLS) do
-    local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    local left = x + (c[1] == "item" and ROW_H + 4 or 0)
-    fs:SetPoint("LEFT", left, 0)
-    fs:SetWidth(c[3] - (left - x) - 8)
-    fs:SetJustifyH(c[4])
-    fs:SetWordWrap(false)
-    r.cells[c[1]] = fs
+    if c[1] ~= "qty" and c[1] ~= "post" then
+      local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      local left = x + (c[1] == "item" and ROW_H + 2 or 0)
+      fs:SetPoint("LEFT", left, 0)
+      fs:SetWidth(c[3] - (left - x) - 8)
+      fs:SetJustifyH(c[4])
+      fs:SetWordWrap(false)
+      r.cells[c[1]] = fs
+    end
     x = x + c[3]
   end
+  -- how many to post (all of it by default)
+  local qx, qw = ColX("qty")
+  local qty = CreateFrame("EditBox", nil, r, "InputBoxTemplate")
+  qty:SetSize(qw - 18, 16)
+  qty:SetPoint("RIGHT", r, "LEFT", qx + qw - 6, 0)
+  qty:SetAutoFocus(false)
+  qty:SetNumeric(true)
+  qty:SetMaxLetters(4)
+  qty:SetJustifyH("RIGHT")
+  qty:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  qty:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  qty:SetScript("OnTextChanged", function(self, user)
+    local g = r.g
+    if not user or not g then return end
+    local n = tonumber(self:GetText())
+    if not n then return end
+    g.qty = math.max(0, math.min(n, MaxQty(g)))
+    Recalc(g)
+    UpdateRow(r, g) -- (just this row: nothing moves while you type)
+  end)
+  qty:SetScript("OnEditFocusLost", function(self)
+    if r.g then self:SetText(r.g.qty) end
+  end)
+  r.qty = qty
+  -- one click = one auction
+  local px, pw = ColX("post")
+  local post = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+  post:SetSize(pw - 10, ROW_H - 4)
+  post:SetPoint("RIGHT", r, "LEFT", px + pw - 4, 0)
+  post:SetScript("OnClick", function()
+    local g = r.g
+    if not g then return end
+    if g.state == "confirm" then Confirm(g) else Post(g) end
+  end)
+  r.post = post
   r:SetScript("OnEnter", function(self)
     if self.link then
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -208,17 +392,34 @@ local function GetRow(i)
   return r
 end
 
-function Refresh()
-  if not panel then return end
-  local list = Sorted()
-  local worth = 0
-  for i, g in ipairs(list) do
-    local r = GetRow(i)
+local function SetRowButton(r, g)
+  local b = r.post
+  if g.state == "done" then
+    b:SetText(L.POSTED) b:Disable() b:Show()
+  elseif g.state == "posting" then
+    b:SetText("...") b:Disable() b:Show()
+  elseif g.state == "confirm" then
+    b:SetText(L.CONFIRM) b:Enable() b:Show()
+  elseif Worth(g) then
+    b:SetText(L.POST)
+    b:SetEnabled(not posting)
+    b:Show()
+  else
+    b:Hide()
+  end
+end
+
+-- one row: returns true if it's worth posting
+function UpdateRow(r, g)
+    local worthIt = false
+    r.g = g
     r.link = g.link
     r.icon:SetTexture(g.icon)
     r.cells.item:SetText(g.link or "?")
-    r.cells.qty:SetText(g.count)
     r.cells.vendor:SetText(Money(g.vendor))
+    if not r.qty:HasFocus() then r.qty:SetText(g.qty or 0) end
+    r.qty:SetShown(g.state ~= "done")
+    if g.commodity and g.state == nil then r.qty:Enable() else r.qty:Disable() end
     if not g.scanned then
       r.cells.ah:SetText(g == current and "..." or "")
       r.cells.gain:SetText("")
@@ -227,17 +428,33 @@ function Refresh()
     elseif not g.price then
       r.cells.ah:SetText("|cff808080" .. (g.noAnswer and L.NO_ANSWER or L.NO_PRICE) .. "|r")
       r.cells.gain:SetText("")
-      r.cells.deposit:SetText(Money(g.deposit))
+      r.cells.deposit:SetText("")
       r:SetAlpha(0.5)
     else
-      r.cells.ah:SetText(Money(g.price))
+      r.cells.ah:SetText(Money(PostPrice(g.price)))
       local good = g.gain and g.gain > 0
-      if good then worth = worth + 1 end
-      r.cells.gain:SetText(good and ("|cff40ff40+" .. Money(g.gain) .. "|r") or ("|cffff6060-" .. Money(-(g.gain or 0)) .. "|r"))
-      r.cells.deposit:SetText(Money(g.deposit))
-      r:SetAlpha(good and 1 or 0.5)
+      worthIt = good
+      if g.state == "done" then
+        r.cells.gain:SetText("")
+        r.cells.deposit:SetText("")
+      else
+        r.cells.gain:SetText(good and ("|cff40ff40+" .. Money(g.gain) .. "|r")
+          or (g.gain and ("|cffff6060-" .. Money(-g.gain) .. "|r") or ""))
+        r.cells.deposit:SetText(Money(g.deposit))
+      end
+      r:SetAlpha((good or g.state == "done") and 1 or 0.5)
     end
+    SetRowButton(r, g)
     r:Show()
+    return worthIt
+end
+
+function Refresh()
+  if not panel then return end
+  local list = order
+  local worth = 0
+  for i, g in ipairs(list) do
+    if UpdateRow(GetRow(i), g) then worth = worth + 1 end
   end
   for i = #list + 1, #rowFrames do rowFrames[i]:Hide() end
   panel.content:SetHeight(math.max(#list * ROW_H, 1))
@@ -250,27 +467,30 @@ function Refresh()
   end
   panel.empty:SetText(scannedOnce and total == 0 and L.NOTHING or "")
   panel.money:SetText(Money(GetMoney and GetMoney() or 0))
+  panel.duration:SetText(string.format(L.DURATION, select(2, Duration())))
 end
 
 local function Header(parent)
   local x = 0
   for _, c in ipairs(COLS) do
-    local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    fs:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", x + (c[1] == "item" and ROW_H + 4 or 0), 4)
-    fs:SetWidth(c[3] - 8 - (c[1] == "item" and ROW_H + 4 or 0))
-    fs:SetJustifyH(c[4])
-    fs:SetText(L[c[2]])
-    -- what "gain" and "deposit" mean, on hover
-    local tipText = (c[1] == "gain" and L.TIP_GAIN) or (c[1] == "deposit" and L.TIP_DEPOSIT)
-    if tipText then
-      local hit = CreateFrame("Frame", nil, parent)
-      hit:SetAllPoints(fs)
-      hit:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(tipText, 1, 1, 1, 1, true)
-        GameTooltip:Show()
-      end)
-      hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    if c[2] ~= "" then
+      local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      fs:SetPoint("BOTTOMLEFT", parent, "TOPLEFT", x + (c[1] == "item" and ROW_H + 2 or 0), 4)
+      fs:SetWidth(c[3] - 8 - (c[1] == "item" and ROW_H + 2 or 0))
+      fs:SetJustifyH(c[4])
+      fs:SetText(L[c[2]])
+      -- what "gain" and "deposit" mean, on hover
+      local tipText = (c[1] == "gain" and L.TIP_GAIN) or (c[1] == "deposit" and L.TIP_DEPOSIT)
+      if tipText then
+        local hit = CreateFrame("Frame", nil, parent)
+        hit:SetAllPoints(fs)
+        hit:SetScript("OnEnter", function(self)
+          GameTooltip:SetOwner(self, "ANCHOR_TOP")
+          GameTooltip:SetText(tipText, 1, 1, 1, 1, true)
+          GameTooltip:Show()
+        end)
+        hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      end
     end
     x = x + c[3]
   end
@@ -302,12 +522,11 @@ local function CreatePanel()
   p.status:SetJustifyH("LEFT")
   p.status:SetWordWrap(false)
 
-  -- your money, bottom left (the window's own money is under our panel)
+  -- your money, bottom left (the window's own money is under our panel); the duration, right
   p.money = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   p.money:SetPoint("BOTTOMLEFT", 14, 9)
-  local note = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("BOTTOMRIGHT", -14, 10)
-  note:SetText(L.READONLY)
+  p.duration = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  p.duration:SetPoint("BOTTOMRIGHT", -14, 10)
 
   local sf = CreateFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
   sf:SetPoint("TOPLEFT", 12, -64)
@@ -343,8 +562,31 @@ local function BlizzardTabs()
   return out
 end
 
+local STRATA = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+
+-- Above everything the window shows right now (some of Blizzard's frames sit very high:
+-- the Sell tab's item slot and buttons, the Auctions tab's top tab...)
+local function RaisePanel()
+  local topStrata, topLevel = AuctionHouseFrame:GetFrameStrata(), AuctionHouseFrame:GetFrameLevel()
+  local function Walk(frame, depth)
+    for _, c in ipairs({ frame:GetChildren() }) do
+      if c ~= panel and c ~= tab and c:IsShown() then
+        local s = c:GetFrameStrata()
+        if (STRATA[s] or 0) > (STRATA[topStrata] or 0) then topStrata, topLevel = s, c:GetFrameLevel()
+        elseif s == topStrata then topLevel = math.max(topLevel, c:GetFrameLevel()) end
+        if depth < 8 then Walk(c, depth + 1) end
+      end
+    end
+  end
+  Walk(AuctionHouseFrame, 0)
+  if (STRATA[topStrata] or 0) >= STRATA.TOOLTIP then topStrata = "FULLSCREEN_DIALOG" end
+  panel:SetFrameStrata(topStrata)
+  panel:SetFrameLevel(math.min(topLevel + 10, 9000))
+end
+
 local function Select(on)
   if not tab then return end
+  if on then RaisePanel() end
   panel:SetShown(on)
   if on then
     StartScan() -- (straight away: what's in your bags, and their prices as they come)
@@ -382,7 +624,8 @@ end
 
 local f = CreateFrame("Frame")
 for _, ev in ipairs({ "ADDON_LOADED", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED",
-  "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED" }) do
+  "COMMODITY_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_UPDATED",
+  "AUCTION_HOUSE_AUCTION_CREATED", "AUCTION_HOUSE_POST_WARNING", "AUCTION_HOUSE_POST_ERROR", "PLAYER_MONEY" }) do
   pcall(f.RegisterEvent, f, ev)
 end
 f:SetScript("OnEvent", function(_, event, a)
@@ -393,11 +636,24 @@ f:SetScript("OnEvent", function(_, event, a)
       CreateTab()
       Select(false)
     elseif event == "AUCTION_HOUSE_CLOSED" then
+      posting = nil
       if panel then Select(false) end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
       OnCommodityResults(a)
     elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
       OnItemResults(a)
+    elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
+      OnPosted()
+    elseif event == "AUCTION_HOUSE_POST_WARNING" then
+      if posting then posting.g.state = "confirm" Refresh() end
+    elseif event == "AUCTION_HOUSE_POST_ERROR" then
+      if posting then
+        posting.g.state = nil
+        posting = nil
+        Refresh()
+      end
+    elseif event == "PLAYER_MONEY" then
+      if panel and panel:IsShown() then Refresh() end
     end
   end)
   if not ok then print("|cff66ccffSellThatStuff|r error (" .. event .. "): " .. tostring(err)) end

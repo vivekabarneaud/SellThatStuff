@@ -7,7 +7,12 @@ local L = {
   SCANNING = "Searching the auction house: %d / %d",
   DONE = "%d of %d items are worth more here than at the vendor.",
   NOTHING = "Nothing in your bags can be sold here.",
-  READONLY = "Read-only for now: nothing is posted.",
+  POST = "Post",
+  CONFIRM = "Confirm",
+  POSTED = "Posted",
+  WAIT = "One moment, the auction house is busy. Click again.",
+  POST_FAILED = "Couldn't post:",
+  DURATION = "Auction duration: %s",
   COL_ITEM = "Item", COL_QTY = "Qty", COL_AH = "AH (each)", COL_VENDOR = "Vendor (each)",
   COL_GAIN = "Gain if sold", COL_DEPOSIT = "Deposit",
   NO_PRICE = "none for sale",
@@ -22,7 +27,12 @@ if GetLocale() == "frFR" then
   L.SCANNING = "Recherche à l'hôtel des ventes : %d / %d"
   L.DONE = "%d objets sur %d valent plus ici que chez le marchand."
   L.NOTHING = "Rien dans vos sacs ne peut être vendu ici."
-  L.READONLY = "Lecture seule pour l'instant : rien n'est mis en vente."
+  L.POST = "Vendre"
+  L.CONFIRM = "Confirmer"
+  L.POSTED = "En vente"
+  L.WAIT = "Un instant, l'hôtel des ventes est occupé. Cliquez à nouveau."
+  L.POST_FAILED = "Mise en vente impossible :"
+  L.DURATION = "Durée des enchères : %s"
   L.COL_ITEM, L.COL_QTY, L.COL_AH, L.COL_VENDOR = "Objet", "Qté", "HV (l'unité)", "Marchand (l'unité)"
   L.COL_GAIN, L.COL_DEPOSIT = "Gain si vendu", "Dépôt"
   L.NO_PRICE = "aucun en vente"
