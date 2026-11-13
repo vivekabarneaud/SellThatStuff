@@ -288,22 +288,6 @@ local function CreatePanel()
   local bg = p:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
   bg:SetColorTexture(0.06, 0.06, 0.06, 1)
-  -- the auctioneer's portrait, copied where the window shows it (our panel covers that corner
-  -- too; if the window's gold ring is drawn above us, it frames this copy)
-  local orig = (AuctionHouseFrame.PortraitContainer and AuctionHouseFrame.PortraitContainer.portrait)
-    or AuctionHouseFrame.portrait or _G.AuctionHouseFramePortrait
-  if orig and orig.GetTop then
-    p.portrait = p:CreateTexture(nil, "ARTWORK")
-    p.portrait:SetAllPoints(orig)
-    if p.CreateMaskTexture then
-      local ok, mask = pcall(p.CreateMaskTexture, p)
-      if ok and mask then
-        mask:SetTexture("Interface/CharacterFrame/TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-        mask:SetAllPoints(p.portrait)
-        p.portrait:AddMaskTexture(mask)
-      end
-    end
-  end
   p:Hide()
   local scan = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
   scan:SetSize(150, 24)
@@ -363,7 +347,6 @@ local function Select(on)
   if not tab then return end
   panel:SetShown(on)
   if on then
-    if panel.portrait then pcall(SetPortraitTexture, panel.portrait, "npc") end -- (the auctioneer)
     StartScan() -- (straight away: what's in your bags, and their prices as they come)
     pcall(PanelTemplates_SelectTab, tab)
     for _, t in ipairs(BlizzardTabs()) do pcall(PanelTemplates_DeselectTab, t) end
