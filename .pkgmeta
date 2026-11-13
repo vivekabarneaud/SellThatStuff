@@ -1,0 +1,13 @@
+# CurseForge packager: builds the release zip when a tag is pushed (v0.4.1-beta...).
+# Its changelog: RELEASE_NOTES.md (only this version's notes; CHANGELOG.md keeps them all).
+# Keep it in sync with .gitattributes (export-ignore): nothing for us goes to players.
+package-as: SellThatStuff
+
+manual-changelog:
+  filename: RELEASE_NOTES.md
+  markup-type: markdown
+
+ignore:
+  - tools
+  - TODO.md
+  - RELEASE_NOTES.md

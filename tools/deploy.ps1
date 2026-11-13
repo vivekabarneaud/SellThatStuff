@@ -14,7 +14,7 @@ if ((Resolve-Path $src).Path -eq $Target) { Write-Error "Target is the repo itse
 if ((Split-Path $Target -Leaf) -ne "SellThatStuff") { Write-Error "Unexpected target: $Target"; exit 1 }
 if (Test-Path (Join-Path $Target ".git")) { Write-Error "Target contains a git repo, not touching it: $Target"; exit 1 }
 
-robocopy $src $Target /MIR /XD .git docs tools .claude /XF TODO.md .gitattributes .gitignore /NFL /NDL /NJH /NJS /NP | Out-Null
+robocopy $src $Target /MIR /XD .git docs tools .claude /XF TODO.md .gitattributes .gitignore .pkgmeta RELEASE_NOTES.md /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { Write-Error "Deploy failed (robocopy code $LASTEXITCODE)"; exit 1 }
 
 "Deployed to $Target ($((Get-ChildItem $Target -File).Count) files). Restart the game to load the changes."
