@@ -669,7 +669,9 @@ end
 
 local function BlizzardTabs()
   local out = {}
-  for _, t in ipairs(AuctionHouseFrame.Tabs or {}) do out[#out + 1] = t end
+  for _, t in ipairs(AuctionHouseFrame.Tabs or {}) do
+    if t ~= tab and not (t.GetName and (t:GetName() or ""):find("^SellThatStuff")) then out[#out + 1] = t end
+  end
   if #out == 0 then
     for _, k in ipairs({ "BuyTab", "SellTab", "AuctionsTab" }) do
       if AuctionHouseFrame[k] then out[#out + 1] = AuctionHouseFrame[k] end
@@ -723,8 +725,9 @@ local function CreateTab()
   CreatePanel()
   local blizz = BlizzardTabs()
   local last = blizz[#blizz]
-  for i, template in ipairs({ "AuctionHouseFrameDisplayModeTabTemplate", "AuctionHouseFrameTabTemplate",
-    "PanelTabButtonTemplate", "CharacterFrameTabButtonTemplate" }) do
+  -- (the game's generic tab: the auction house's own tab style adds itself to Blizzard's list of
+  -- tabs, which must stay theirs only)
+  for i, template in ipairs({ "PanelTabButtonTemplate", "CharacterFrameTabButtonTemplate" }) do
     local ok, b = pcall(CreateFrame, "Button", "SellThatStuffTab" .. i, AuctionHouseFrame, template)
     if ok and b then tab = b SellThatStuffDB.tabTemplate = template break end
     if not ok then SellThatStuffDB["tabTemplateError" .. i] = tostring(b) end
