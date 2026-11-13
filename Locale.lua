@@ -12,7 +12,9 @@ local L = {
   POSTED = "Posted",
   WAIT = "One moment, the auction house is busy. Click again.",
   POST_FAILED = "Couldn't post:",
-  DURATION = "Auction duration: %s",
+  DURATION = "Duration:",
+  MIN_GAIN = "Minimum gain:",
+  TIP_MIN_GAIN = "Auctions whose total gain over the vendor is below this aren't offered.",
   COL_ITEM = "Item", COL_QTY = "Qty", COL_AH = "AH (each)", COL_EACH = "Gain (each)",
   COL_TOTAL = "Total gain", COL_DEPOSIT = "Deposit",
   SORT = "Sort by gain",
@@ -34,7 +36,9 @@ if GetLocale() == "frFR" then
   L.POSTED = "En vente"
   L.WAIT = "Un instant, l'hôtel des ventes est occupé. Cliquez à nouveau."
   L.POST_FAILED = "Mise en vente impossible :"
-  L.DURATION = "Durée des enchères : %s"
+  L.DURATION = "Durée :"
+  L.MIN_GAIN = "Gain minimum :"
+  L.TIP_MIN_GAIN = "Les ventes dont le gain total par rapport au marchand est inférieur à ce montant ne sont pas proposées."
   L.COL_ITEM, L.COL_QTY, L.COL_AH, L.COL_EACH = "Objet", "Qté", "HV (l'unité)", "Gain (l'unité)"
   L.COL_TOTAL, L.COL_DEPOSIT = "Gain total", "Dépôt"
   L.SORT = "Trier par gain"

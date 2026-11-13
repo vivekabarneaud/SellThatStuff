@@ -27,17 +27,28 @@ local scannedOnce         -- a scan was started at least once (for the "nothing 
 local posting             -- { g, qty }: an auction on its way (waiting for the game's answer)
 local order = {}          -- the rows, in the order shown (sorted once the scan is over, so they don't move under your cursor)
 
--- Auction duration: the one whose name says 8 hours (the game's own labels), else the middle one
-local durationIndex, durationLabel
+-- Auction duration: your choice (saved), else the one whose name says 8 hours (the game's
+-- own labels), else the middle one
+local DURATION_KEYS = { "AUCTION_DURATION_ONE", "AUCTION_DURATION_TWO", "AUCTION_DURATION_THREE" }
+local function DurationLabel(i) return type(_G[DURATION_KEYS[i]]) == "string" and _G[DURATION_KEYS[i]] or tostring(i) end
+local defaultDuration
 local function Duration()
-  if durationIndex then return durationIndex, durationLabel end
-  for i, k in ipairs({ "AUCTION_DURATION_ONE", "AUCTION_DURATION_TWO", "AUCTION_DURATION_THREE" }) do
-    local s = _G[k]
-    if type(s) == "string" and s:match("^%s*8%D") then durationIndex, durationLabel = i, s end
+  local i = SellThatStuffDB and SellThatStuffDB.duration
+  if not i then
+    if not defaultDuration then
+      defaultDuration = 2
+      for j = 1, 3 do
+        if DurationLabel(j):match("^%s*8%D") then defaultDuration = j end
+      end
+    end
+    i = defaultDuration
   end
-  if not durationIndex then durationIndex, durationLabel = 2, _G.AUCTION_DURATION_TWO or "?" end
-  return durationIndex, durationLabel
+  return i, DurationLabel(i)
 end
+
+-- The least an auction must gain over the vendor to be offered (total, in copper; saved)
+local function MinGain() return (SellThatStuffDB and SellThatStuffDB.minGain) or 0 end
+local function GainOK(g) return g.gain and g.gain > 0 and g.gain >= MinGain() end
 
 -- The price we post at: the cheapest one found (rounded down to silver if the auction
 -- house doesn't take copper)
@@ -218,7 +229,7 @@ end
 -- Posting (on a click: the game only allows it then)
 ---------------------------------------------------------------------------
 
-local function Worth(g) return g.scanned and g.price and g.gain and g.gain > 0 and g.qty > 0 end
+local function Worth(g) return g.scanned and g.price and GainOK(g) and g.qty > 0 end
 
 -- Is the item still where we saw it? (you may have moved things around since the scan)
 local function StillThere(g)
@@ -434,14 +445,14 @@ function UpdateRow(r, g)
       r:SetAlpha(0.5)
     else
       r.cells.ah:SetText(Money(PostPrice(g.price)))
-      local good = g.gain and g.gain > 0
+      local good = GainOK(g) -- (worth it: gains something, and at least your minimum)
       worthIt = good
       if g.state == "done" then
         r.cells.gain:SetText("")
         r.cells.deposit:SetText("")
       else
-        r.cells.gain:SetText(good and ("|cff40ff40+" .. Money(g.gain) .. "|r")
-          or (g.gain and ("|cffff6060-" .. Money(-g.gain) .. "|r") or ""))
+        r.cells.gain:SetText(not g.gain and "" or g.gain > 0 and ("|cff40ff40+" .. Money(g.gain) .. "|r")
+          or ("|cffff6060-" .. Money(-g.gain) .. "|r"))
         r.cells.deposit:SetText(Money(g.deposit))
       end
       r:SetAlpha((good or g.state == "done") and 1 or 0.5)
@@ -469,7 +480,11 @@ function Refresh()
   end
   panel.empty:SetText(scannedOnce and total == 0 and L.NOTHING or "")
   panel.money:SetText(Money(GetMoney and GetMoney() or 0))
-  panel.duration:SetText(string.format(L.DURATION, select(2, Duration())))
+  -- the duration in use stays lit
+  for i, b in ipairs(panel.durButtons) do
+    if i == Duration() then b:LockHighlight() else b:UnlockHighlight() end
+  end
+  panel.ShowMinGain()
 end
 
 local function Header(parent)
@@ -558,15 +573,80 @@ local function CreatePanel()
   p.status:SetJustifyH("LEFT")
   p.status:SetWordWrap(false)
 
-  -- your money, bottom left (the window's own money is under our panel); the duration, right
+  -- Bottom bar: your money (the window's own is under our panel), the minimum gain and the
+  -- auction duration (both saved)
   p.money = p:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-  p.money:SetPoint("BOTTOMLEFT", 14, 9)
-  p.duration = p:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  p.duration:SetPoint("BOTTOMRIGHT", -14, 10)
+  p.money:SetPoint("BOTTOMLEFT", 14, 11)
+
+  local minLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  minLabel:SetPoint("BOTTOMLEFT", 150, 12)
+  minLabel:SetText(L.MIN_GAIN)
+  local tipHit = CreateFrame("Frame", nil, p)
+  tipHit:SetAllPoints(minLabel)
+  tipHit:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L.TIP_MIN_GAIN, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  tipHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  local COIN = { "|TInterface/MoneyFrame/UI-GoldIcon:12:12|t", "|TInterface/MoneyFrame/UI-SilverIcon:12:12|t",
+    "|TInterface/MoneyFrame/UI-CopperIcon:12:12|t" }
+  local MULT = { 10000, 100, 1 }
+  p.minBoxes = {}
+  local anchor = minLabel
+  for i = 1, 3 do
+    local b = CreateFrame("EditBox", nil, p, "InputBoxTemplate")
+    b:SetSize(i == 1 and 36 or 24, 16)
+    b:SetPoint("LEFT", anchor, "RIGHT", i == 1 and 12 or 8, 0)
+    b:SetAutoFocus(false)
+    b:SetNumeric(true)
+    b:SetMaxLetters(i == 1 and 4 or 2)
+    b:SetJustifyH("CENTER")
+    local coin = p:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    coin:SetPoint("LEFT", b, "RIGHT", 2, 0)
+    coin:SetText(COIN[i])
+    b:SetScript("OnTextChanged", function(self, user)
+      if not user then return end
+      local c = 0
+      for j = 1, 3 do c = c + (tonumber(p.minBoxes[j]:GetText()) or 0) * MULT[j] end
+      SellThatStuffDB.minGain = c
+      Refresh()
+    end)
+    b:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    b:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    p.minBoxes[i] = b
+    anchor = coin
+  end
+  function p.ShowMinGain()
+    local c = MinGain()
+    local parts = { math.floor(c / 10000), math.floor(c % 10000 / 100), c % 100 }
+    for i, b in ipairs(p.minBoxes) do
+      if not b:HasFocus() then b:SetText(parts[i]) end
+    end
+  end
+
+  p.durButtons = {}
+  local prev
+  for i = 3, 1, -1 do -- (from the right)
+    local b = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    b:SetSize(78, 20)
+    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("BOTTOMRIGHT", -14, 8) end
+    b:SetText(DurationLabel(i))
+    b:SetScript("OnClick", function()
+      SellThatStuffDB.duration = i
+      for _, g in ipairs(results) do Recalc(g) end -- (the deposit depends on it)
+      Refresh()
+    end)
+    p.durButtons[i] = b
+    prev = b
+  end
+  local durLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  durLabel:SetPoint("RIGHT", prev, "LEFT", -8, 0)
+  durLabel:SetText(L.DURATION)
 
   local sf = CreateFrame("ScrollFrame", nil, p, "UIPanelScrollFrameTemplate")
   sf:SetPoint("TOPLEFT", 12, -64)
-  sf:SetPoint("BOTTOMRIGHT", -30, 32)
+  sf:SetPoint("BOTTOMRIGHT", -30, 36)
   local content = CreateFrame("Frame", nil, sf)
   content:SetSize(1, 1)
   sf:SetScrollChild(content)
@@ -629,7 +709,9 @@ local function Select(on)
     -- straight away the first time (what's in your bags, and their prices as they come);
     -- after that, the table stays as it was until you rescan or leave the auction house
     if not scannedOnce then StartScan() else Refresh() end
-    pcall(PanelTemplates_SelectTab, tab)
+    -- (what happens when we give our tab the "selected" look: noted for the next fix)
+    local okSel, errSel = pcall(PanelTemplates_SelectTab, tab)
+    SellThatStuffDB.tabSelect = okSel and "ok" or tostring(errSel)
     for _, t in ipairs(BlizzardTabs()) do pcall(PanelTemplates_DeselectTab, t) end
   else
     pcall(PanelTemplates_DeselectTab, tab)
@@ -644,7 +726,8 @@ local function CreateTab()
   for i, template in ipairs({ "AuctionHouseFrameDisplayModeTabTemplate", "AuctionHouseFrameTabTemplate",
     "PanelTabButtonTemplate", "CharacterFrameTabButtonTemplate" }) do
     local ok, b = pcall(CreateFrame, "Button", "SellThatStuffTab" .. i, AuctionHouseFrame, template)
-    if ok and b then tab = b break end
+    if ok and b then tab = b SellThatStuffDB.tabTemplate = template break end
+    if not ok then SellThatStuffDB["tabTemplateError" .. i] = tostring(b) end
   end
   if not tab then return end
   tab:SetText(L.TAB)
@@ -654,7 +737,14 @@ local function CreateTab()
   pcall(PanelTemplates_DeselectTab, tab)
   tab:SetScript("OnClick", function() Select(true) end)
   -- a Blizzard tab clicked: back to the window's own content
-  for _, t in ipairs(blizz) do t:HookScript("OnClick", function() Select(false) end) end
+  -- (and give the clicked tab its selected look back: the window does nothing when you click
+  -- the tab it thinks is already open)
+  for _, t in ipairs(blizz) do
+    t:HookScript("OnClick", function(self)
+      Select(false)
+      pcall(PanelTemplates_SelectTab, self)
+    end)
+  end
 end
 
 ---------------------------------------------------------------------------
