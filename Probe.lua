@@ -4,7 +4,7 @@
 -- your bags and records what comes back. It never posts or buys anything.
 -- Saved in SellThatStuffDB.probe (read after logging out), and summed up in the chat.
 
-local ADDON = ...
+local ADDON, ns = ...
 
 local ahOpen = false
 local pending = {}   -- searches waiting for results: key -> record
@@ -205,13 +205,4 @@ f:SetScript("OnEvent", function(_, event, a, b)
   if not ok then Print("error in " .. event .. ": " .. tostring(err)) end
 end)
 
-SLASH_SELLTHATSTUFF1 = "/sts"
-SlashCmdList.SELLTHATSTUFF = function(msg)
-  msg = (msg or ""):lower()
-  if msg == "probe" then
-    local ok, err = pcall(RunProbe)
-    if not ok then Print("probe error: " .. tostring(err)) end
-  else
-    Print("/sts probe - test what the auction house offers (at an auction house)")
-  end
-end
+ns.RunProbe = RunProbe -- (/sts probe, in SellThatStuff.lua)
