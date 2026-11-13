@@ -165,6 +165,7 @@ local function RecountAll()
       g.qty = math.min(g.qty or 0, MaxQty(g))
       if g.qty <= 0 then g.qty = MaxQty(g) end
       Recalc(g)
+      if g.state == "done" and g.count > 0 then g.state = nil end -- (more of it came back in your bags)
     end
     if g.count > 0 or g.state == "done" or g.state == "posting" then keep[#keep + 1] = g end
   end
@@ -311,9 +312,11 @@ local function OnPosted()
   if not p then return end
   local g = p.g
   g.posted = (g.posted or 0) + p.qty
-  g.state = nil
-  -- the bags update a moment later
+  -- all of it posted: "Posted" right away (so the bag update that follows doesn't take the
+  -- row away); some left: the row stays, with what's left (the bags update a moment later)
+  g.state = p.qty >= (g.count or 0) and "done" or nil
   C_Timer.After(0.5, function()
+    if g.state == "done" then return end
     Recount(g)
     if g.count <= 0 then g.state = "done" end
     Recalc(g)
