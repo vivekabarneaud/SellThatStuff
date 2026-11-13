@@ -12,6 +12,13 @@ local probe          -- the current probe record
 
 local function Print(...) print("|cff66ccffSellThatStuff|r:", ...) end
 
+-- (this client has the C_Item version of GetItemInfo, maybe not the old global one)
+local ItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+local function Money(c)
+  local f = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or GetCoinTextureString
+  return f and f(c) or (tostring(c) .. "c")
+end
+
 local function Keys(t)
   local out = {}
   if type(t) ~= "table" then return out end
@@ -60,7 +67,7 @@ end
 local function RecordItem(t)
   local r = { bag = t.bag, slot = t.slot, itemID = t.info.itemID, link = t.info.hyperlink,
     quality = t.info.quality, stack = t.info.stackCount }
-  local _, _, _, _, _, _, _, maxStack, _, _, sellPrice = GetItemInfo(t.info.itemID)
+  local _, _, _, _, _, _, _, maxStack, _, _, sellPrice = ItemInfo(t.info.itemID)
   r.vendorPrice, r.maxStack = sellPrice, maxStack
   local loc = ItemLocation and ItemLocation.CreateFromBagAndSlot and ItemLocation:CreateFromBagAndSlot(t.bag, t.slot)
   r.hasItemLocation = loc ~= nil
@@ -108,7 +115,7 @@ local function OnCommodity(itemID)
   end
   r.full = AH.HasFullCommoditySearchResults and AH.HasFullCommoditySearchResults(itemID)
   Print(r.link or r.itemID, "commodity:", r.num or "?", "results",
-    r.results[1] and ("cheapest " .. GetCoinTextureString(r.results[1].unitPrice or 0) .. " each") or "")
+    r.results[1] and ("cheapest " .. Money(r.results[1].unitPrice or 0) .. " each") or "")
 end
 
 local function OnItems(itemKey)
@@ -126,7 +133,7 @@ local function OnItems(itemKey)
   r.full = AH.HasFullItemSearchResults and AH.HasFullItemSearchResults(itemKey)
   local first = r.results[1]
   Print(r.link or r.itemID, "item:", r.num or "?", "results",
-    first and ("cheapest " .. GetCoinTextureString(first.buyoutAmount or first.bidAmount or 0)) or "")
+    first and ("cheapest " .. Money(first.buyoutAmount or first.bidAmount or 0)) or "")
 end
 
 local function RunProbe()
